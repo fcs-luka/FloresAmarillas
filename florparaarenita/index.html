@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Flores Amarillas — Regalo</title>
+<meta name="theme-color" content="#000000" />
+<style>
+  :root{
+    --bg-very-dark: #000101;
+    --text-yellow: #ffe77a;
+    --muted-white: rgba(255,255,255,0.06);
+    --control-bg: rgba(255,255,255,0.04);
+    --glass: rgba(255,255,255,0.03);
+    --radius: 12px;
+  }
+  /* reset / layout */
+  html,body{height:100%;margin:0;background:var(--bg-very-dark);color:var(--text-yellow);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; overflow:hidden}
+  #app{position:relative;width:100%;height:100vh;touch-action:manipulation; -webkit-tap-highlight-color: transparent;}
+  canvas{display:block;width:100%;height:100%;position:absolute;inset:0;background:transparent}
+  /* central message */
+  .message{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;padding:14px 18px;max-width:86%;
+    line-height:1.02;z-index:6;pointer-events:none;
+    color:var(--text-yellow);font-weight:700;
+    font-size:clamp(18px,4.8vw,28px);
+    text-shadow: 0 6px 22px rgba(0,0,0,0.8);
+  }
+  .sub{
+    display:block;font-weight:500;font-size:clamp(12px,2.8vw,14px);margin-top:8px;color:var(--muted-white);
+  }
+  /* small hint */
+  .hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);color:var(--muted-white);font-size:12px;z-index:5;pointer-events:none}
+
+  /* floating audio controls */
+  .controls{
+    position:fixed;right:14px;bottom:14px;z-index:12;
+    display:flex;align-items:center;gap:8px;padding:8px;border-radius:16px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);backdrop-filter: blur(6px);
+  }
+  .btn{
+    width:46px;height:46px;border-radius:12px;border:0;background:var(--control-bg);color:var(--text-yellow);
+    display:grid;place-items:center;font-size:18px;cursor:pointer;
+  }
+  .btn:active{transform:translateY(1px)}
+  .file-btn{
+    font-size:12px;padding:8px 10px;border-radius:10px;border:none;background:var(--glass);color:var(--text-yellow);cursor:pointer;
+  }
+  .vol { display:flex;align-items:center;gap:8px;padding-right:6px }
+  .vol input[type="range"]{ width:96px; -webkit-appearance:none; height:6px; background:rgba(255,255,255,0.06); border-radius:10px; }
+  .vol input[type="range"]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%; background:var(--text-yellow); box-shadow: 0 2px 8px rgba(0,0,0,0.5); border:none; }
+
+  /* overlay for autoplay block */
+  #tapOverlay{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:linear-gradient(0deg, rgba(0,0,0,0.68), rgba(0,0,0,0.32));z-index:50;color:var(--text-yellow);font-weight:700;
+  }
+  #tapOverlay .card{
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:14px;text-align:center;max-width:86%;
+    box-shadow: 0 18px 38px rgba(0,0,0,0.6);
+  }
+  #tapOverlay button{margin-top:12px;padding:10px 14px;border-radius:10px;border:none;background:var(--text-yellow);color:#000;font-weight:800;cursor:pointer}
+
+  /* accessibility: reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    * { transition:none !important; animation:none !important; }
+    canvas { image-rendering: -webkit-optimize-contrast; }
+  }
+
+  /* small responsive tweaks */
+  @media (max-width:420px){
+    .controls { right:10px; bottom:10px; gap:6px; padding:6px; }
+    .btn{ width:44px; height:44px; }
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="c" aria-hidden="true"></canvas>
+
+    <div class="message" aria-hidden="true">
+      Tu no seras espectadora, <br /><span style="opacity:0.95">Mi Arenita Renegona >:3</span>
+      <span class="sub">Flores amarillas que laten con la canción ✨</span>
+    </div>
+
+    <div class="hint">Toca la pantalla para generar más flores · Toca el botón ▶ para reproducir</div>
+
+    <!-- Controls -->
+    <div class="controls" role="region" aria-label="Controles de audio">
+      <button id="playBtn" class="btn" aria-pressed="false" title="Play/Pausa">►</button>
+      <div class="vol" aria-hidden="false">
+        <input id="vol" type="range" min="0" max="1" step="0.01" value="0.18" aria-label="Volumen">
+      </div>
+      <label class="file-btn" title="Cargar canción (mp3)">
+        Cargar MP3
+        <input id="fileInput" type="file" accept="audio/*" style="display:none">
+      </label>
+    </div>
+
+    <!-- autoplay overlay (si el navegador lo bloquea) -->
+    <div id="tapOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        Toca para escuchar — y ya puedes cerrar este mensaje ✨
+        <div><button id="tapBtn">Reproducir</button></div>
+      </div>
+    </div>
+
+    <!-- intent to autoplay pista1.mp3 (coloca pista1.mp3 en la misma carpeta) -->
+    <audio id="bgAudio" src="pista1.mp3" loop preload="auto" crossorigin="anonymous"></audio>
+  </div>
+
+<script>
+/* ------------------------------------------------------------------
+   Archivo: index.html
+   Qué hace: animación de flores amarillas, sincronizada con audio.
+   Uso: coloca pista1.mp3 en la misma carpeta y abre este HTML en móvil.
+   ------------------------------------------------------------------ */
+
+/* ---------- UTIL / SETUP CANVAS ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: true });
+let W = 0, H = 0, DPR = Math.max(window.devicePixelRatio || 1, 1);
+
+function resizeCanvas(){
+  DPR = Math.max(window.devicePixelRatio || 1, 1);
+  W = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+  H = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas, { passive:true });
+window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 120), { passive:true });
+
+/* ---------- FLOWER CLASS & DRAW ---------- */
+class Flower {
+  constructor(opts = {}){ this.reset(opts); }
+  reset(opts = {}){
+    this.baseX = opts.baseX ?? Math.random() * W;
+    this.x = this.baseX;
+    this.y = opts.y ?? (H + Math.random() * (H * 0.45));
+    this.size = opts.size ?? (10 + Math.random() * 34);
+    this.speed = opts.speed ?? (0.35 + Math.random() * 1.2);
+    this.sway = opts.sway ?? (6 + Math.random() * 28);
+    this.phase = Math.random() * Math.PI * 2;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.petalCount = opts.petals ?? (5 + Math.floor(Math.random() * 4));
+    this.petalColor = opts.petalColor ?? this.randomYellow();
+    this.centerColor = opts.centerColor ?? this.randomCenter();
+    this.opacity = 0.94;
+    this.lifeSpeed = 0.9 + Math.random() * 1.6;
+    this.pulse = 0; // escala temporal por beat
+  }
+
+  randomYellow(){
+    const r = 250;
+    const g = 200 + Math.floor(Math.random() * 55);
+    const b = 40 + Math.floor(Math.random() * 60);
+    return `rgb(${r},${g},${b})`;
+  }
+  randomCenter(){
+    const r = 200 + Math.floor(Math.random() * 56);
+    const g = 100 + Math.floor(Math.random() * 80);
+    return `rgb(${r},${g},0)`;
+  }
+
+  update(dt, t){
+    this.y -= this.speed * dt * this.lifeSpeed * 0.06 * (1 + this.size * 0.02);
+    this.x = this.baseX + Math.sin((t + this.phase) * 0.0025 * (0.8 + this.sway * 0.03)) * this.sway;
+    this.rotation += Math.sin((t + this.phase) * 0.0007) * 0.01;
+    // pulso decae
+    this.pulse *= 0.82;
+    if (this.y < -this.size * 3) this.reset({ baseX: Math.random() * W, y: H + Math.random() * 120 });
+  }
+
+  draw(ctx){
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+    const size = this.size * (1 + this.pulse * 0.36);
+
+    // sombra
+    ctx.save();
+    ctx.globalAlpha = 0.18 * this.opacity;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath();
+    ctx.ellipse(4, 6, size * 0.6, size * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // pétalos
+    for (let i = 0; i < this.petalCount; i++){
+      const ang = (i / this.petalCount) * Math.PI * 2;
+      ctx.save();
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.6, size * 0.42, size * 0.95, 0, 0, Math.PI * 2);
+      ctx.fillStyle = applyAlpha(this.petalColor, 0.95 * this.opacity);
+      ctx.fill();
+
+      // brillo sutil
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.75, size * 0.22, size * 0.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // centro
+    ctx.beginPath();
+    ctx.fillStyle = applyAlpha(this.centerColor, this.opacity);
+    ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+
+    // chispa central
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.arc(-size * 0.12, -size * 0.06, size * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+/* ---------- HELPERS ---------- */
+function applyAlpha(rgbStr, alpha){
+  return rgbStr.replace('rgb', 'rgba').replace(')', `,${Math.max(0, Math.min(1, alpha))})`);
+}
+
+/* ---------- FLOWER POOL ---------- */
+let flowers = [];
+function populate(n){
+  flowers = [];
+  for (let i = 0; i < n; i++){
+    flowers.push(new Flower({
+      baseX: Math.random() * W,
+      y: H + Math.random() * H * 0.5,
+      size: 8 + Math.random() * 36,
+      speed: 0.4 + Math.random() * 1.2,
+      sway: 6 + Math.random() * 28,
+      petals: 5 + Math.floor(Math.random() * 4)
+    }));
+  }
+}
+function initialPopulate(){
+  const area = W * H;
+  let target = 22;
+  if (area > 800000) target = 28;
+  if (area > 1400000) target = 40;
+  if (area < 300000) target = 14;
+  populate(target);
+}
+
+/* ---------- RENDER LOOP ---------- */
+let last = performance.now(), rafId;
+let globalPulse = 0;
+
+function loop(ts){
+  const dt = ts - last;
+  last = ts;
+
+  // clear + subtle vignette
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W * 0.5, H * 0.62, Math.min(W, H) * 0.12, W * 0.5, H * 0.62, Math.max(W, H) * 0.9);
+  g.addColorStop(0, '#0b0b0b'); g.addColorStop(1, '#000000');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // halo on beat
+  if (globalPulse > 0.02){
+    ctx.save();
+    const pAlpha = Math.min(0.28, globalPulse * 0.22);
+    ctx.fillStyle = `rgba(255,220,100,${pAlpha})`;
+    ctx.beginPath();
+    ctx.arc(W * 0.5, H * 0.45, Math.min(W, H) * (0.18 + globalPulse * 0.28), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  for (let f of flowers){
+    f.update(dt, performance.now());
+    f.draw(ctx);
+  }
+
+  globalPulse *= 0.82;
+  rafId = requestAnimationFrame(loop);
+}
+
+/* spawn burst on tap */
+function spawnBurst(x, n = 8){
+  for (let i = 0; i < n; i++){
+    const f = new Flower({
+      baseX: x + (Math.random() * 140 - 70),
+      y: H + Math.random() * 80,
+      size: 12 + Math.random() * 40,
+      speed: 0.6 + Math.random() * 1.6,
+      sway: 6 + Math.random() * 28,
+      petals: 5 + Math.floor(Math.random() * 4),
+      petalColor: null
+    });
+    f.pulse = 0.9;
+    flowers.push(f);
+  }
+  if (flowers.length > 160) flowers.splice(0, flowers.length - 160);
+}
+
+/* start canvas */
+function startCanvas(){
+  resizeCanvas();
+  initialPopulate();
+  last = performance.now();
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+/* pointer handlers */
+canvas.addEventListener('touchstart', (e) => {
+  const x = (e.touches && e.touches[0]) ? e.touches[0].clientX : (W * 0.5);
+  spawnBurst(x, 8);
+}, { passive:true });
+canvas.addEventListener('click', (e) => {
+  spawnBurst(e.clientX || W * 0.5, 8);
+}, { passive:true });
+
+/* ---------- AUDIO: autoplay attempt + analyser (beat detection) ---------- */
+const audioEl = document.getElementById('bgAudio');
+const playBtn = document.getElementById('playBtn');
+const vol = document.getElementById('vol');
+const fileInput = document.getElementById('fileInput');
+const tapOverlay = document.getElementById('tapOverlay');
+const tapBtn = document.getElementById('tapBtn');
+
+let audioCtx = null;
+let sourceNode = null;
+let analyser = null;
+let freqData = null;
+let masterGain = null;
+let fileAudio = null;
+let usingFile = false;
+let audioReady = false;
+
+// simple energy history for beat detection
+const historySize = 43;
+let energyHistory = new Array(historySize).fill(0);
+let energyIndex = 0;
+let lastBeatTime = 0;
+const beatCooldown = 160; // ms
+let sensitivity = 1.25;
+
+function ensureAudioCtx(){
+  if (audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AC();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = parseFloat(vol.value || 0.18);
+  masterGain.connect(audioCtx.destination);
+}
+
+// attach analyser to an HTMLAudioElement
+function attachAnalyserToAudioElement(el){
+  ensureAudioCtx();
+  try { if (sourceNode) sourceNode.disconnect(); } catch(e){}
+  sourceNode = audioCtx.createMediaElementSource(el);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.78;
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  sourceNode.connect(analyser);
+  analyser.connect(masterGain);
+  audioReady = true;
+}
+
+// attempt autoplay on load, fallback overlay if blocked
+(async function tryAutoplay(){
+  try {
+    audioEl.volume = parseFloat(vol.value || 0.18);
+    await audioEl.play();
+    // if success, attach analyser to audioEl (if supported)
+    try { attachAnalyserToAudioElement(audioEl); } catch(e){ console.warn('no analyser attach', e); }
+    tapOverlay.style.display = 'none';
+    updatePlayBtn(true);
+  } catch(err){
+    // autoplay blocked -> show overlay to request single tap
+    tapOverlay.style.display = 'flex';
+  }
+})();
+
+// overlay button
+tapBtn.addEventListener('click', async () => {
+  try {
+    await audioEl.play();
+    attachAnalyserToAudioElement(audioEl);
+    tapOverlay.style.display = 'none';
+    updatePlayBtn(true);
+  } catch(e){ console.warn('play failed on tap', e); }
+});
+
+// play button behavior
+playBtn.addEventListener('click', async () => {
+  // If the user loaded their own file, control fileAudio; else control bgAudio
+  const target = (usingFile && fileAudio) ? fileAudio : audioEl;
+  if (!audioReady && !usingFile) {
+    // try to attach analyser now
+    try { attachAnalyserToAudioElement(audioEl); } catch(e){}
+  }
+  if (target.paused) {
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+      await target.play();
+      updatePlayBtn(true);
+    } catch(e){
+      console.warn('play error', e);
+      // if play fails, show overlay
+      tapOverlay.style.display = 'flex';
+    }
+  } else {
+    target.pause();
+    updatePlayBtn(false);
+  }
+});
+
+function updatePlayBtn(playing){
+  playBtn.textContent = playing ? '❚❚' : '►';
+  playBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+}
+
+// volume control
+vol.addEventListener('input', () => {
+  const v = parseFloat(vol.value);
+  if (masterGain) masterGain.gain.value = v;
+  if (fileAudio) fileAudio.volume = v;
+  audioEl.volume = v;
+});
+
+/* file input: user can load a local mp3 and we sync to it */
+fileInput.addEventListener('change', async (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  // stop previous if there
+  if (fileAudio) try { fileAudio.pause(); } catch(e){}
+  const url = URL.createObjectURL(f);
+  fileAudio = new Audio(url);
+  fileAudio.loop = true;
+  fileAudio.crossOrigin = "anonymous";
+  fileAudio.volume = parseFloat(vol.value || 0.18);
+  // connect analyser to fileAudio
+  try {
+    attachAnalyserToAudioElement(fileAudio);
+    usingFile = true;
+    // try to play (may require user gesture)
+    const playPromise = fileAudio.play();
+    playPromise.then(() => {
+      updatePlayBtn(true);
+    }).catch(() => {
+      // need gesture: show overlay
+      tapOverlay.style.display = 'flex';
+      updatePlayBtn(false);
+    });
+  } catch(err){
+    console.warn('attach file analyser failed', err);
+  }
+});
+
+/* ---------- BEAT DETECTION LOOP ---------- */
+function analyzeBeat(){
+  if (!analyser || !freqData) {
+    requestAnimationFrame(analyzeBeat);
+    return;
+  }
+  analyser.getByteFrequencyData(freqData);
+  // take low-frequency bins (kick / bass)
+  const nLow = Math.max(2, Math.floor(freqData.length * 0.12)); // ~12% lowest bins
+  let lowSum = 0;
+  for (let i = 0; i < nLow; i++) lowSum += freqData[i];
+  const normalized = lowSum / (255 * nLow);
+  // circular history
+  energyHistory[energyIndex] = normalized;
+  energyIndex = (energyIndex + 1) % historySize;
+  const histAvg = energyHistory.reduce((a, b) => a + b, 0) / historySize;
+
+  const threshold = Math.max(0.02, histAvg * sensitivity);
+  const now = performance.now();
+  if (normalized > threshold && normalized > 0.015 && (now - lastBeatTime) > beatCooldown){
+    lastBeatTime = now;
+    const strength = Math.min(2.5, (normalized - histAvg) / Math.max(0.0001, histAvg));
+    onBeatDetected(Math.max(0.4, strength));
+  }
+
+  requestAnimationFrame(analyzeBeat);
+}
+
+function onBeatDetected(strength){
+  // pulse global halo
+  globalPulse = Math.min(1.6, globalPulse + Math.min(1.5, strength * 1.25));
+  // boost some flowers
+  for (let i = 0; i < 7; i++){
+    const idx = Math.floor(Math.random() * flowers.length);
+    if (flowers[idx]) flowers[idx].pulse = Math.max(flowers[idx].pulse, 0.5 + Math.random() * 0.9 * strength);
+  }
+  // occasionally spawn a burst near center
+  if (Math.random() < 0.65) spawnBurst(W * 0.5 + (Math.random() * W * 0.2 - W * 0.1), 4 + Math.floor(Math.random() * 6));
+}
+
+/* ---------- START EVERYTHING ---------- */
+startCanvas();
+requestAnimationFrame(analyzeBeat);
+
+/* ensure audio context can be created by a user gesture if needed (friendly) */
+const resumeOnFirstGesture = () => {
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  document.removeEventListener('touchstart', resumeOnFirstGesture);
+  document.removeEventListener('click', resumeOnFirstGesture);
+};
+document.addEventListener('touchstart', resumeOnFirstGesture, { passive:true, once:true });
+document.addEventListener('click', resumeOnFirstGesture, { passive:true, once:true });
+
+/* nice: small friendly autosave hint (not intrusive) */
+window.addEventListener('pagehide', () => {
+  try {
+    if (fileAudio) fileAudio.pause();
+    audioEl.pause();
+  } catch(e){}
+});
+</script>
+</body>
+</html>
